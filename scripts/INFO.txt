@@ -1,0 +1,2 @@
+MongoClientTry: mongoimport --drop -d students -c grades grades.json
+MorphiaTry: mongoimport --drop -d school -c students students.json

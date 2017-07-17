@@ -8,10 +8,12 @@ import model.Comment;
 import model.Post;
 import org.bson.Document;
 import org.mongodb.morphia.Datastore;
+import org.mongodb.morphia.Key;
 import org.mongodb.morphia.query.Query;
 import org.mongodb.morphia.query.UpdateOperations;
 
 import java.util.*;
+import java.util.function.Consumer;
 
 public class BlogPostDAO {
 	final MongoCollection<Document> postsCollection;
@@ -26,6 +28,14 @@ public class BlogPostDAO {
 		Document post = postsCollection
 				.find(Filters.eq("permalink", permalink))
 				.first();
+		if (post != null) {
+			List<Document> comments = (List<Document>) post.get("comments");
+			for (Document comment : comments) {
+				if (!comment.containsKey("num_likes")) {
+					comment.put("num_likes", 0);
+				}
+			}
+		}
 		return post;
 	}
 
@@ -75,30 +85,49 @@ public class BlogPostDAO {
 		return permalink;
 	}
 
-	public void addPostComment(final String name, final String email, final String body,
-	                           final String permalink) {
+	public void addPostComment(final String name, final String email, final String body, final String permalink) {
+		Consumer<Post> commentsUpdater = (Post post) -> {
+			List<Comment> comments = getComments(post);
+			Comment comment = new Comment();
+			comment.setBody(body);
+			if (name != null) {
+				comment.setAuthor(name);
+			}
+			if (email != null) {
+				comment.setEmail(email);
+			}
+			comments.add(comment);
+		};
+		updateComments(permalink, commentsUpdater);
+	}
 
-		Query<Post> query = datastore.createQuery(Post.class).field("permalink").equal(permalink);
+	public void likePost(final String permalink, final int ordinal) {
+		Consumer<Post> commentsUpdater = (Post post) -> {
+			List<Comment> comments = getComments(post);
+			if (comments.size() < ordinal + 1) {
+				throw new RuntimeException("Ooops, that's weird. Ordinal is greated then the comments amount.");
+			}
+			int oldNum = post.getComments().get(ordinal).getNum_likes();
+			post.getComments().get(ordinal).setNum_likes(++oldNum);
+		};
+		updateComments(permalink, commentsUpdater);
+	}
 
-		Post post = query.get();
+	private List<Comment> getComments(Post post) {
 		List<Comment> comments = post.getComments();
 		if (comments == null) {
 			comments = new ArrayList<>();
 		}
+		return comments;
+	}
 
-		Comment comment = new Comment();
-		comment.setBody(body);
-		if (name != null) {
-			comment.setAuthor(name);
-		}
-		if (email != null) {
-			comment.setEmail(email);
-		}
-		comments.add(comment);
-
+	private void updateComments(String permalink, Consumer<Post> commentsUpdater) {
+		Query<Post> query = datastore.createQuery(Post.class).field("permalink").equal(permalink);
+		Post post = query.get();
+		commentsUpdater.accept(post);
 		UpdateOperations<Post> updateComments = datastore
 				.createUpdateOperations(Post.class)
-				.set("comments", comments);
+				.set("comments", post.getComments());
 		datastore.update(query, updateComments);
 	}
 }
